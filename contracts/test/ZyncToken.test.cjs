@@ -182,4 +182,45 @@ describe("ZyncToken", function () {
       "CapExceeded"
     );
   });
+  it("emits MintPriceUpdated with correct previous and new price", async function () {
+    const price = hre.ethers.parseEther("0.001");
+    const newPrice = hre.ethers.parseEther("0.002");
+    const Z = await hre.ethers.getContractFactory("ZyncToken");
+    const token = await Z.deploy(price);
+    await token.waitForDeployment();
+
+    await expect(token.setMintPrice(newPrice))
+      .to.emit(token, "MintPriceUpdated")
+      .withArgs(price, newPrice);
+  });
+
+  it("emits TreasuryMint with correct to and amount on mintTo", async function () {
+    const [owner, recipient] = await hre.ethers.getSigners();
+    const price = hre.ethers.parseEther("0.001");
+    const Z = await hre.ethers.getContractFactory("ZyncToken");
+    const token = await Z.deploy(price);
+    await token.waitForDeployment();
+
+    const amount = hre.ethers.parseEther("500");
+
+    await expect(token.connect(owner).mintTo(recipient.address, amount))
+      .to.emit(token, "TreasuryMint")
+      .withArgs(recipient.address, amount);
+  });
+
+  it("emits Withdrawn with correct to and amount on withdraw", async function () {
+    const [owner, buyer] = await hre.ethers.getSigners();
+    const price = hre.ethers.parseEther("0.001");
+    const Z = await hre.ethers.getContractFactory("ZyncToken");
+    const token = await Z.deploy(price);
+    await token.waitForDeployment();
+
+    await token.connect(buyer).mintWithEth({ value: price });
+
+    const contractBal = await hre.ethers.provider.getBalance(await token.getAddress());
+
+    await expect(token.connect(owner).withdraw())
+      .to.emit(token, "Withdrawn")
+      .withArgs(owner.address, contractBal);
+  });
 });

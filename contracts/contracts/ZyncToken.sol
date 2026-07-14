@@ -16,7 +16,9 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
     uint256 public totalMinted;
 
     event Burned(address indexed from, uint256 amount);
-
+    event MintPriceUpdated(uint256 indexed previousPrice, uint256 indexed newPrice);
+    event TreasuryMint(address indexed to, uint256 amount);
+    event Withdrawn(address indexed to, uint256 amount);
 
 
     error CapExceeded();
@@ -30,7 +32,9 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
 
     function setMintPrice(uint256 newPriceWei) external onlyOwner {
     if (newPriceWei == 0) revert ZeroMintPrice();
+    uint256 previousPrice = mintPriceWei;
     mintPriceWei = newPriceWei;
+    emit MintPriceUpdated(previousPrice, newPriceWei);
     }
 
     /// @notice Treasury / airdrops — does not require ETH; capped by MAX_SUPPLY.
@@ -38,6 +42,7 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
         if (totalMinted + amount > MAX_SUPPLY) revert CapExceeded();
         totalMinted += amount;
         _mint(to, amount);
+        emit TreasuryMint(to, amount);
     }
 
     /// @notice Buy ZYNC with native currency on the same chain.
@@ -73,8 +78,10 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
     }
 
     function withdraw() external onlyOwner nonReentrant {
+        uint256 amount = address(this).balance;
         (bool ok, ) = payable(owner()).call{value: address(this).balance}("");
         require(ok, "withdraw failed");
+        emit Withdrawn(owner(), amount);
     }
 
     receive() external payable {
