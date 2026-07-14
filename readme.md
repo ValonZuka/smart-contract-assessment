@@ -1,173 +1,78 @@
 # ZyncSwap — Smart Contract Developer Assessment
 
-Welcome to the ZyncSwap **Smart Contract Developer** assessment.
 
-ZyncSwap is a decentralised exchange platform built around the **ZYNC** utility token. This repository includes a reference Next.js frontend and API for context, but **your assessment is limited to the `contracts/` workspace** — Solidity, Hardhat tests, and deployment scripts.
+### A note on forking
 
-You are **not** expected to modify frontend or backend code.
+Forking was disabled on the original assessment repository, so instead of a
+GitHub "fork" I cloned the repo locally and pushed the full history to a new
+repository under my own account (`git remote set-url origin <my-repo>` +
+`git push -u origin main`). The commit history from the original repo is
+preserved. Happy to switch to a proper fork if forking gets re-enabled.
 
-Focus on correctness, security, and test coverage. Submit what you have when time is up.
 
----
 
-## Time Consideration
+All 29 tests pass on a clean checkout (13 for `ZyncToken`, 16 for `ZyncVesting`).
 
-This assessment is scoped for **4–6 hours**. If you hit your limit, submit what you have and use your README to describe what you would finish next.
 
----
-
-## Getting Started
-
-You need **Node.js 18+** and **npm**.
-
-### Contract work (required for the assessment)
+To deploy "ZyncVesting" against a running local chain:
 
 ```bash
-# 1. Fork this repo and clone your fork
-git clone https://github.com/YOUR_USERNAME/smart-contract-assessment.git
-cd smart-contract-assessment
-npm install
-
-# 2. Compile contracts
-npm run compile
-
-# 3. Run existing tests
-npm run test:contracts
+# with ZYNC_TOKEN_ADDRESS set in .env from the deploy step above
+npx hardhat run contracts/scripts/deploy-vesting.cjs --network localhost --config contracts/hardhat.config.cjs
 ```
 
-### Running the full project (optional)
+### What I changed
 
-The DEX frontend and API are included so you can explore the product and verify your deployed contract on a local chain. **You do not need to change any frontend or backend code** to complete the assessment.
+**Task 1 — Bug fix**
+`setMintPrice` was checking the *current* price instead of the *incoming*
+one, so `setMintPrice(0)` never reverted and permanently bricked
+`mintWithEth`. Fixed by validating `newPriceWei` and added a custom error
+`ZeroMintPrice`. Also added tests confirming the ETH refund logic in
+`mintWithEth` already worked correctly for non-exact multiples of the mint
+price — I initially assumed it rounded to whole tokens, but it actually
+mints proportionally and only refunds when integer division truncates, so
+I adjusted the test to use a price that forces truncation instead of
+changing the contract.
 
-```bash
-# 1. Set up environment variables
-cp .env.example .env
+**Task 2 — Burn**
+Added `burn` and `burnFrom` (via the standard ERC-20 allowance flow) plus a
+`Burned` event. The trickier part was the cap: the original cap check used
+`totalSupply() + amount > MAX_SUPPLY`, but `totalSupply()` drops when
+tokens are burned, which would have let someone mint, burn, and mint again
+past the intended 1B cap indefinitely. I added a `totalMinted` counter that
+only ever increases and used that for the cap check instead.
 
-# 2. Start a local Hardhat blockchain (keep this terminal open)
-npm run chain
+**Task 3 — Events**
+Added `MintPriceUpdated`, `TreasuryMint`, and `Withdrawn`, each with
+indexed parameters, and tests asserting the exact event args.
 
-# 3. Deploy the ZyncToken contract (new terminal)
-npm run deploy
-# Copy the printed address into .env as ZYNC_TOKEN_ADDRESS
+**Task 4 — ZyncVesting**
+New contract. Design decisions:
+- One vesting schedule per beneficiary (no overlapping schedules) — kept
+  scope manageable given the time budget.
+- Admin funds the contract first via `fund()`, then allocates from that
+  balance with `createVestingSchedule`. This means a schedule can never be
+  created for more tokens than the contract actually holds unallocated.
+- Standard linear vesting: nothing before the cliff, then vests linearly
+  from `start` to `start + duration`.
+- Follows checks-effects-interactions in `release()` (state updated before
+  the token transfer) plus `nonReentrant`, so double-claiming isn't
+  possible even if the token had a malicious hook.
 
-# 4. Start the app
-npm run dev
-# → http://localhost:3000
-```
+### Known limitations / what I'd improve with more time
 
----
+- Only one active schedule per beneficiary. A production version would
+  probably support multiple schedules per address (e.g. an array or a
+  schedule ID) for cases like multiple grants over time.
+- No schedule revocation/admin cancel function — some vesting designs let
+  the admin revoke unvested tokens (e.g. for employee departures). Didn't
+  add it since it wasn't in the spec, but it's a natural next step.
+- No batch operations (e.g. `createVestingSchedule` for many beneficiaries
+  in one tx) — would help with gas costs for larger token distributions.
+- Test coverage uses `evm_setNextBlockTimestamp` to test specific points in
+  the vesting curve; a fuzz/property-based test (e.g. with Foundry or
+  hardhat-based fuzzing) would give broader confidence across random
+  start/cliff/duration/timestamp combinations.
 
-## Project Structure
-
-Your work lives under `contracts/`:
-
-```
-contracts/
-├── contracts/
-│   └── ZyncToken.sol     # ERC-20 ZYNC token (mint, cap, ETH sale)
-├── scripts/
-│   └── deploy.cjs        # Hardhat deploy script
-├── test/
-│   └── ZyncToken.test.cjs
-└── hardhat.config.cjs
-```
-
-`ZyncToken.sol` is an ERC-20 with:
-
-- A fixed `MAX_SUPPLY` cap
-- Owner-controlled `mintTo` (treasury / airdrops)
-- Public `mintWithEth` (payable mint at `mintPriceWei`)
-- Owner `setMintPrice` and `withdraw` of sale proceeds
-- `ReentrancyGuard` on payable functions
-
----
-
-## Tasks
-
-### Task 1 — Bug Fix & Hardening
-
-Review `ZyncToken.sol` and fix issues in the minting logic:
-
-- `setMintPrice(0)` currently bricks `mintWithEth` permanently (every call reverts with `ZeroAmount`)
-- Add validation so the owner cannot set a zero price, **or** handle the zero-price case explicitly with a clear revert message
-- Ensure `mintWithEth` still refunds excess ETH correctly when `msg.value` is not an exact multiple of the mint price
-- Add or extend tests in `contracts/test/` for the edge cases above
-
----
-
-### Task 2 — Token Burn
-
-Extend `ZyncToken.sol`:
-
-- Add `burn(uint256 amount)` so any holder can destroy their own tokens
-- Add `burnFrom(address account, uint256 amount)` using the ERC-20 allowance mechanism
-- Emit `Burned(address indexed from, uint256 amount)` on every burn
-- Enforce `MAX_SUPPLY` semantics correctly (burned tokens should not count toward remaining mintable supply)
-- Write tests covering: successful burn, burn exceeding balance, `burnFrom` with sufficient allowance, and `burnFrom` without allowance
-
----
-
-### Task 3 — Events & Observability
-
-Improve on-chain observability without changing core business logic:
-
-- Emit indexed events for: mint price updates, treasury mints (`mintTo`), and ETH withdrawals
-- Follow existing naming conventions and include relevant parameters (`previousPrice`, `newPrice`, `to`, `amount`, etc.)
-- Add tests that assert events are emitted with the correct arguments (use Hardhat/Chai event matchers)
-
----
-
-### Task 4 — New Contract: ZyncVesting
-
-Add a new contract `ZyncVesting.sol` in `contracts/contracts/`:
-
-- Accept ZYNC deposits from an owner/admin at construction or via a `fund()` function
-- Allow the admin to create vesting schedules: `(beneficiary, amount, start, cliff, duration)`
-- Beneficiaries call `release()` to claim vested tokens linearly after the cliff
-- Prevent double-claiming and reentrancy on `release()`
-- Write a deploy script update (or a separate `deploy-vesting.cjs`) and full test coverage in `contracts/test/ZyncVesting.test.cjs`
-
----
-
-## Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run compile` | Compile Solidity contracts |
-| `npm run test:contracts` | Run Hardhat contract tests |
-| `npm run chain` | Start local Hardhat node |
-| `npm run deploy` | Deploy ZyncToken to localhost |
-| `npm run dev` | Start Next.js dev server on port 3000 |
-| `npm run client:build` | Production build |
-| `npm run start` | Start production server |
-
----
-
-## Evaluation Criteria
-
-| Area | Weight |
-|------|--------|
-| Task 1 — Bug Fix & Hardening | 25% |
-| Task 2 — Token Burn | 25% |
-| Task 3 — Events & Observability | 20% |
-| Task 4 — ZyncVesting | 30% |
-
-You are also evaluated on:
-
-- Solidity correctness and gas awareness
-- Security practices (reentrancy, access control, input validation)
-- Test coverage and edge-case handling
-- Code clarity and consistency with the existing style
-- Clear commit history and README notes
-
----
-
-## Submission
-
-- Do **not** open a PR to this repo — share your **fork URL**
-- In your fork, update this `README.md` to explain:
-  - How to compile and run your tests
-  - Any security assumptions or known limitations
-  - What you would improve or finish given more time
-- Verify `npm install` → `npm run compile` → `npm run test:contracts` passes on a clean checkout
-- If you ran the full app, confirm `npm run chain` → `npm run deploy` → `npm run dev` works end-to-end
+  **NOTE**
+`ZyncVesting` was done with the help of artificial intelligence. 
