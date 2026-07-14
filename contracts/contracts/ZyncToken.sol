@@ -16,13 +16,16 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
 
     error CapExceeded();
     error ZeroAmount();
+    error ZeroMintPrice();
+
 
     constructor(uint256 initialMintPriceWei) ERC20("Zync", "ZYNC") Ownable(msg.sender) {
         mintPriceWei = initialMintPriceWei;
     }
 
     function setMintPrice(uint256 newPriceWei) external onlyOwner {
-        mintPriceWei = newPriceWei;
+    if (newPriceWei == 0) revert ZeroMintPrice();
+    mintPriceWei = newPriceWei;
     }
 
     /// @notice Treasury / airdrops — does not require ETH; capped by MAX_SUPPLY.
