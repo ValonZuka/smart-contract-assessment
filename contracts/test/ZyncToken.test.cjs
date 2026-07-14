@@ -89,4 +89,97 @@ describe("ZyncToken", function () {
       token.connect(buyer).mintWithEth({ value: 0 })
     ).to.be.revertedWithCustomError(token, "ZeroAmount");
   });
+  it("allows a holder to burn their own tokens and emits Burned", async function () {
+    const [, buyer] = await hre.ethers.getSigners();
+    const price = hre.ethers.parseEther("0.001");
+    const Z = await hre.ethers.getContractFactory("ZyncToken");
+    const token = await Z.deploy(price);
+    await token.waitForDeployment();
+
+    await token.connect(buyer).mintWithEth({ value: price });
+    const burnAmount = hre.ethers.parseEther("0.4");
+
+    await expect(token.connect(buyer).burn(burnAmount))
+      .to.emit(token, "Burned")
+      .withArgs(buyer.address, burnAmount);
+
+    const bal = await token.balanceOf(buyer.address);
+    expect(bal).to.equal(hre.ethers.parseEther("0.6"));
+  });
+
+  it("reverts when burning more than the caller's balance", async function () {
+    const [, buyer] = await hre.ethers.getSigners();
+    const price = hre.ethers.parseEther("0.001");
+    const Z = await hre.ethers.getContractFactory("ZyncToken");
+    const token = await Z.deploy(price);
+    await token.waitForDeployment();
+
+    await token.connect(buyer).mintWithEth({ value: price });
+    const tooMuch = hre.ethers.parseEther("2");
+
+    await expect(token.connect(buyer).burn(tooMuch)).to.be.reverted;
+  });
+
+  it("allows burnFrom with sufficient allowance and emits Burned", async function () {
+    const [, buyer, spender] = await hre.ethers.getSigners();
+    const price = hre.ethers.parseEther("0.001");
+    const Z = await hre.ethers.getContractFactory("ZyncToken");
+    const token = await Z.deploy(price);
+    await token.waitForDeployment();
+
+    await token.connect(buyer).mintWithEth({ value: price });
+    const burnAmount = hre.ethers.parseEther("0.3");
+
+    await token.connect(buyer).approve(spender.address, burnAmount);
+
+    await expect(
+      token.connect(spender).burnFrom(buyer.address, burnAmount)
+    )
+      .to.emit(token, "Burned")
+      .withArgs(buyer.address, burnAmount);
+
+    const bal = await token.balanceOf(buyer.address);
+    expect(bal).to.equal(hre.ethers.parseEther("0.7"));
+  });
+
+  it("reverts burnFrom without sufficient allowance", async function () {
+    const [, buyer, spender] = await hre.ethers.getSigners();
+    const price = hre.ethers.parseEther("0.001");
+    const Z = await hre.ethers.getContractFactory("ZyncToken");
+    const token = await Z.deploy(price);
+    await token.waitForDeployment();
+
+    await token.connect(buyer).mintWithEth({ value: price });
+
+    // no approval given
+    await expect(
+      token.connect(spender).burnFrom(buyer.address, hre.ethers.parseEther("0.1"))
+    ).to.be.reverted;
+  });
+
+  it("does not allow burned tokens to free up additional mint capacity beyond MAX_SUPPLY", async function () {
+    const price = 1n; // 1 wei per full token, so we can mint the full cap cheaply
+    const Z = await hre.ethers.getContractFactory("ZyncToken");
+    const token = await Z.deploy(price);
+    await token.waitForDeployment();
+
+    const maxSupply = await token.MAX_SUPPLY();
+
+    // mint the entire cap via owner treasury mint
+    await token.mintTo(await token.owner(), maxSupply);
+    expect(await token.totalMinted()).to.equal(maxSupply);
+
+    // burn some tokens
+    const burnAmount = hre.ethers.parseEther("1000");
+    await token.burn(burnAmount);
+
+    // totalSupply drops, but totalMinted must NOT drop
+    expect(await token.totalMinted()).to.equal(maxSupply);
+
+    // attempting to mint again, even a small amount, should still fail
+   await expect(token.mintTo(await token.owner(), 1)).to.be.revertedWithCustomError(
+      token,
+      "CapExceeded"
+    );
+  });
 });

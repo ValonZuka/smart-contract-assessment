@@ -13,6 +13,11 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
 
     /// Price in wei for 1e18 wei of tokens (one full ZYNC with 18 decimals).
     uint256 public mintPriceWei;
+    uint256 public totalMinted;
+
+    event Burned(address indexed from, uint256 amount);
+
+
 
     error CapExceeded();
     error ZeroAmount();
@@ -30,7 +35,8 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
 
     /// @notice Treasury / airdrops — does not require ETH; capped by MAX_SUPPLY.
     function mintTo(address to, uint256 amount) external onlyOwner {
-        if (totalSupply() + amount > MAX_SUPPLY) revert CapExceeded();
+        if (totalMinted + amount > MAX_SUPPLY) revert CapExceeded();
+        totalMinted += amount;
         _mint(to, amount);
     }
 
@@ -41,7 +47,7 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
 
         uint256 tokenAmount = (msg.value * 10 ** 18) / mintPriceWei;
         if (tokenAmount == 0) revert ZeroAmount();
-        if (totalSupply() + tokenAmount > MAX_SUPPLY) revert CapExceeded();
+        if (totalMinted + tokenAmount > MAX_SUPPLY) revert CapExceeded();
 
         uint256 costWei = (tokenAmount * mintPriceWei) / 10 ** 18;
         _mint(msg.sender, tokenAmount);
@@ -51,6 +57,19 @@ contract ZyncToken is ERC20, Ownable, ReentrancyGuard {
             (bool ok, ) = payable(msg.sender).call{value: refund}("");
             require(ok, "refund failed");
         }
+    }
+
+    /// @notice Destroy caller's own tokens.
+    function burn(uint256 amount) external {
+        _burn(msg.sender, amount);
+        emit Burned(msg.sender, amount);
+    }
+
+    /// @notice Destroy tokens from `account` using the caller's allowance.
+    function burnFrom(address account, uint256 amount) external {
+        _spendAllowance(account, msg.sender, amount);
+        _burn(account, amount);
+        emit Burned(account, amount);
     }
 
     function withdraw() external onlyOwner nonReentrant {
