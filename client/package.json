@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
+    "dev": "node run.mjs dev",
     "build": "next build",
-    "start": "node server.js",
+    "start": "node run.mjs start",
     "lint": "next lint"
   }
 }
