@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NEXT_IGNORE_INCORRECT_LOCKFILE=1 fuser -k 3000/tcp 2>/dev/null; node server.js",
+    "dev": "node server.js",
     "build": "next build",
-    "start": "fuser -k 3000/tcp 2>/dev/null; NODE_ENV=production node server.js",
+    "start": "node server.js",
     "lint": "next lint"
   }
 }
